@@ -3789,123 +3789,95 @@
         }
 
         // Confirm purchase
-        async function confirmPurchase() {
-            const userAmount = document.getElementById('userAmount').value.trim();
-            const utrId = document.getElementById('utrId').value.trim();
+        // --- এই নতুন এবং সঠিক কোডটি পেস্ট করুন START ---
+async function confirmPurchase() {
+    // সমাধান: সঠিক ইনপুট ফিল্ডের আইডি 'senderNumber' এবং 'trxId' ব্যবহার করা হয়েছে।
+    const senderNumber = document.getElementById('senderNumber').value.trim();
+    const trxId = document.getElementById('trxId').value.trim();
 
-            // Validation
-            if (!userAmount) {
-                showNotification('Please enter the amount you paid', 'error');
-                return;
+    // ইনপুট ফিল্ড খালি আছে কিনা তা পরীক্ষা করা
+    if (!senderNumber) {
+        showNotification('দয়া করে আপনার ফোন নম্বরটি লিখুন', 'error');
+        return;
+    }
+    if (!trxId) {
+        showNotification('দয়া করে ট্রানজেকশন আইডি (TrxID) লিখুন', 'error');
+        return;
+    }
+    // ফোন নম্বরের ফর্ম্যাট ঠিক আছে কিনা তা যাচাই করা
+    if (!/^(01[3-9]\d{8})$/.test(senderNumber)) {
+        showNotification('অনুগ্রহ করে একটি সঠিক ফোন নম্বর লিখুন (যেমন: 01xxxxxxxxx)', 'error');
+        return;
+    }
+
+    try {
+        showLoading('আপনার অর্ডারটি প্রসেস করা হচ্ছে...');
+
+        // কার্ট থেকে মোট টাকার পরিমাণ হিসাব করা
+        const subtotal = window.cart.reduce((sum, item) => sum + parseFloat(item.price), 0);
+        const discount = window.appliedCoupon ? window.appliedCoupon.discount : 0;
+        const total = Math.max(0, subtotal - discount);
+
+        const orderRef = window.dbPush(window.dbRef(window.db, 'orders'));
+        const orderId = orderRef.key;
+        
+        const productTitles = window.cart.map(item => item.title).join(', ');
+
+        const orderData = {
+            productId: window.cart[0].id, 
+            productSnapshot: {
+                title: productTitles, 
+                imageUrl: window.cart[0].image,
+                itemCount: window.cart.length
+            },
+            // সমাধান: ব্যবহারকারীর দেওয়া সঠিক ফোন নম্বর ও TrxID যোগ করা হয়েছে
+            userInput: {
+                trxId: trxId,
+                senderNumber: senderNumber,
+                name: window.currentUser.displayName || 'N/A',
+                email: window.currentUser.email
+            },
+            userId: window.currentUser.uid,
+            userEmail: window.currentUser.email,
+            couponUsed: window.appliedCoupon ? window.appliedCoupon.code : null,
+            discountAmount: window.appliedCoupon ? window.appliedCoupon.discount : 0,
+            finalAmount: total,
+            status: 'pending',
+            createdAt: new Date().toISOString()
+        };
+
+        await window.dbSet(orderRef, orderData);
+
+        await window.dbSet(
+            window.dbRef(window.db, `users/${window.currentUser.uid}/purchases/${orderId}`), {
+                orderId: orderId, 
+                productId: window.cart.map(item => item.id), 
+                purchasedAt: new Date().toISOString()
             }
+        );
 
-            if (!utrId) {
-                showNotification('Please enter UTR ID', 'error');
-                return;
-            }
+        hideLoading();
+        
+        clearCart();
+        window.appliedCoupon = null;
 
-            const amountPaid = parseFloat(userAmount);
-            if (isNaN(amountPaid) || amountPaid <= 0) {
-                showNotification('Please enter a valid amount', 'error');
-                return;
-            }
+        document.getElementById('senderNumber').value = '';
+        document.getElementById('trxId').value = '';
+        closeModal('paymentModal');
+        
+        showNotification('🎉 আপনার অর্ডারটি সফলভাবে জমা দেওয়া হয়েছে!', 'success');
 
-            if (utrId.length < 10 || utrId.length > 16) {
-                showNotification('UTR ID must be between 10 and 16 characters', 'error');
-                return;
-            }
+        setTimeout(() => {
+            showPurchaseHistory();
+        }, 1500);
 
-            if (!/^[a-zA-Z0-9]+$/.test(utrId)) {
-                showNotification('UTR ID must contain only letters and numbers', 'error');
-                return;
-            }
+    } catch (error) {
+        hideLoading();
+        console.error('Error placing order:', error);
+        showNotification('অর্ডার করতে একটি সমস্যা হয়েছে।', 'error');
+    }
+}
 
-            try {
-                showLoading('Processing your order...');
-
-                // Calculate totals
-                const subtotal = window.cart.reduce((sum, item) => sum + parseFloat(item.price), 0);
-                const discount = window.appliedCoupon ? window.appliedCoupon.discount : 0;
-                const total = Math.max(0, subtotal - discount);
-
-                // Create orders for each product in cart
-                for (const item of window.cart) {
-                    const orderRef = window.dbPush(window.dbRef(window.db, 'orders'));
-                    const orderId = orderRef.key;
-
-                    const orderData = {
-                        productId: item.id,
-                        amountPaid: amountPaid,
-                        productSnapshot: {
-                            title: item.title,
-                            imageUrl: item.image,
-                            discountedPrice: item.price
-                        },
-                        userInput: {
-                            utrId,
-                            name: window.currentUser.displayName || 'N/A',
-                            email: window.currentUser.email,
-                            phone: 'N/A'
-                        },
-                        userId: window.currentUser.uid,
-                        userEmail: window.currentUser.email,
-                        couponUsed: window.appliedCoupon ? window.appliedCoupon.code : null,
-                        discountAmount: window.appliedCoupon ? window.appliedCoupon.discount : 0,
-                        finalAmount: total,
-                        status: 'pending',
-                        createdAt: new Date().toISOString()
-                    };
-
-                    await window.dbSet(orderRef, orderData);
-
-                    // Add to user's purchases
-                    await window.dbSet(
-                        window.dbRef(window.db, `users/${window.currentUser.uid}/purchases/${orderId}`), {
-                            orderId: orderId,
-                            productId: item.id,
-                            purchasedAt: new Date().toISOString()
-                        }
-                    );
-                }
-
-                // Update coupon usage if applied
-                if (window.appliedCoupon) {
-                    const couponRef = window.dbRef(window.db, `coupons/${window.appliedCoupon.id}`);
-                    const couponSnapshot = await window.dbGet(couponRef);
-
-                    if (couponSnapshot.exists()) {
-                        const currentUsage = couponSnapshot.val().usedCount || 0;
-                        await window.dbUpdate(couponRef, {
-                            usedCount: currentUsage + 1
-                        });
-                    }
-                }
-
-                hideLoading();
-
-                // Clear cart
-                clearCart();
-                window.appliedCoupon = null;
-
-                // Clear form
-                document.getElementById('userAmount').value = '';
-                document.getElementById('utrId').value = '';
-
-                closeModal('paymentModal');
-
-                showNotification('🎉 Order placed successfully! Check your purchase history.', 'success');
-
-                // Show success animation
-                setTimeout(() => {
-                    showPurchaseHistory();
-                }, 1500);
-
-            } catch (error) {
-                hideLoading();
-                console.error('Error placing order:', error);
-                showNotification('Failed to place order: ' + error.message, 'error');
-            }
-        }
 
         // Show products page
         function showProducts() {
